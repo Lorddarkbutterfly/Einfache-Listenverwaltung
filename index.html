@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Checklisten Editor</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f6f9;
+      margin: 0;
+      padding: 30px;
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: auto;
+      background: white;
+      padding: 25px;
+      border-radius: 18px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+
+    h1 {
+      margin-top: 0;
+      text-align: center;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 20px;
+      justify-content: center;
+    }
+
+    button,
+    input[type="file"] {
+      padding: 10px 16px;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 15px;
+    }
+
+    button {
+      background: #2563eb;
+      color: white;
+      transition: 0.2s;
+    }
+
+    button:hover {
+      background: #1d4ed8;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border-radius: 12px;
+    }
+
+    th {
+      background: #d9ead3;
+      padding: 12px;
+      border: 1px solid #ccc;
+    }
+
+    td {
+      border: 1px solid #ccc;
+      padding: 8px;
+      text-align: center;
+    }
+
+    td input[type="text"] {
+      width: 100%;
+      border: none;
+      outline: none;
+      padding: 6px;
+      font-size: 14px;
+      background: transparent;
+      box-sizing: border-box;
+    }
+
+    td input[type="checkbox"] {
+      width: 20px;
+      height: 20px;
+      cursor: pointer;
+    }
+
+    .footer {
+      margin-top: 20px;
+      text-align: center;
+      color: #666;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <h1>Checklisten Editor</h1>
+
+    <div class="toolbar">
+      <button onclick="addRow()">➕ Zeile hinzufügen</button>
+      <button onclick="exportExcel()">📥 Excel exportieren</button>
+      <input type="file" id="excelFile" accept=".xlsx,.xls" onchange="importExcel(event)">
+    </div>
+
+    <table id="checklistTable">
+      <thead>
+        <tr>
+          <th>Erledigt</th>
+          <th>Nummer</th>
+          <th>Raumnummer</th>
+          <th>Lehrer</th>
+          <th>Notizen</th>
+          <th>Aktion</th>
+        </tr>
+      </thead>
+      <tbody>
+      </tbody>
+    </table>
+
+    <div class="footer">
+      Excel-Dateien können importiert und exportiert werden.
+    </div>
+  </div>
+
+  <script>
+    const tbody = document.querySelector('#checklistTable tbody');
+
+    function addRow(data = {}) {
+      const row = document.createElement('tr');
+
+      row.innerHTML = `
+        <td><input type="checkbox" ${data.erledigt ? 'checked' : ''}></td>
+        <td><input type="text" value="${data.nummer || ''}"></td>
+        <td><input type="text" value="${data.raum || ''}"></td>
+        <td><input type="text" value="${data.lehrer || ''}"></td>
+        <td><input type="text" value="${data.notiz || ''}" placeholder="Notiz eingeben..."></td>
+        <td><button onclick="deleteRow(this)">🗑️</button></td>
+      `;
+
+      tbody.appendChild(row);
+    }
+
+    function deleteRow(button) {
+      button.closest('tr').remove();
+    }
+
+    function exportExcel() {
+      const rows = [];
+
+      document.querySelectorAll('#checklistTable tbody tr').forEach(row => {
+        const cells = row.querySelectorAll('td');
+
+        rows.push({
+          Erledigt: cells[0].querySelector('input').checked ? 'Ja' : 'Nein',
+          Nummer: cells[1].querySelector('input').value,
+          Raumnummer: cells[2].querySelector('input').value,
+          Lehrer: cells[3].querySelector('input').value,
+          Notizen: cells[4].querySelector('input').value
+        });
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      const workbook = XLSX.utils.book_new();
+
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Checkliste');
+
+      XLSX.writeFile(workbook, 'Checkliste.xlsx');
+    }
+
+    function importExcel(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+
+      reader.onload = function(e) {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+
+        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json(firstSheet);
+
+        tbody.innerHTML = '';
+
+        json.forEach(item => {
+          addRow({
+            erledigt: item.Erledigt === 'Ja' || item.Erledigt === true,
+            nummer: item.Nummer || '',
+            raum: item.Raumnummer || '',
+            lehrer: item.Lehrer || '',
+            notiz: item.Notizen || ''
+          });
+        });
+      };
+
+      reader.readAsArrayBuffer(file);
+    }
+
+    // Automatisch neue Zeile hinzufügen
+    function ensureEmptyRow() {
+      const rows = document.querySelectorAll('#checklistTable tbody tr');
+      const lastRow = rows[rows.length - 1];
+
+      if (!lastRow) {
+        addRow();
+        return;
+      }
+
+      const inputs = lastRow.querySelectorAll('input[type="text"]');
+      const hasContent = Array.from(inputs).some(input => input.value.trim() !== '');
+
+      if (hasContent) {
+        addRow();
+      }
+    }
+
+    tbody.addEventListener('input', (e) => {
+      if (e.target.tagName === 'INPUT') {
+        ensureEmptyRow();
+      }
+    });
+
+    // Standardzeilen
+    for (let i = 0; i < 10; i++) {
+      addRow();
+    }
+  </script>
+
+</body>
+</html>
