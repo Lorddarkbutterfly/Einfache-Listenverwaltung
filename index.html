@@ -37,16 +37,12 @@
       justify-content: center;
     }
 
-    button,
-    input[type="file"] {
+    button {
       padding: 10px 16px;
       border: none;
       border-radius: 10px;
       cursor: pointer;
       font-size: 15px;
-    }
-
-    button {
       background: #2563eb;
       color: white;
       transition: 0.2s;
@@ -99,6 +95,7 @@
     }
   </style>
 </head>
+
 <body>
 
   <div class="container">
@@ -106,8 +103,12 @@
 
     <div class="toolbar">
       <button onclick="addRow()">➕ Zeile hinzufügen</button>
-      <button onclick="exportExcel()">📥 Excel exportieren</button>
-      <input type="file" id="excelFile" accept=".xlsx,.xls" onchange="importExcel(event)">
+
+      <button onclick="importExcel()">📂 Excel öffnen</button>
+
+      <button onclick="saveExcel()">💾 Speichern</button>
+
+      <button onclick="exportExcel()">📥 Exportieren</button>
     </div>
 
     <table id="checklistTable">
@@ -121,28 +122,44 @@
           <th>Aktion</th>
         </tr>
       </thead>
+
       <tbody>
       </tbody>
     </table>
 
     <div class="footer">
-      Excel-Dateien können importiert und exportiert werden.
+      Excel-Dateien können geöffnet, bearbeitet und gespeichert werden.
     </div>
   </div>
 
   <script>
+
     const tbody = document.querySelector('#checklistTable tbody');
 
+    let currentFileHandle = null;
+
     function addRow(data = {}) {
+
       const row = document.createElement('tr');
 
       row.innerHTML = `
         <td><input type="checkbox" ${data.erledigt ? 'checked' : ''}></td>
+
         <td><input type="text" value="${data.nummer || ''}"></td>
+
         <td><input type="text" value="${data.raum || ''}"></td>
+
         <td><input type="text" value="${data.lehrer || ''}"></td>
-        <td><input type="text" value="${data.notiz || ''}" placeholder="Notiz eingeben..."></td>
-        <td><button onclick="deleteRow(this)">🗑️</button></td>
+
+        <td>
+          <input type="text"
+                 value="${data.notiz || ''}"
+                 placeholder="Notiz eingeben...">
+        </td>
+
+        <td>
+          <button onclick="deleteRow(this)">🗑️</button>
+        </td>
       `;
 
       tbody.appendChild(row);
@@ -152,10 +169,68 @@
       button.closest('tr').remove();
     }
 
-    function exportExcel() {
+    async function importExcel() {
+
+      try {
+
+        [currentFileHandle] = await window.showOpenFilePicker({
+          types: [{
+            description: 'Excel Dateien',
+            accept: {
+              'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+              'application/vnd.ms-excel': ['.xls']
+            }
+          }]
+        });
+
+        const file = await currentFileHandle.getFile();
+
+        const data = await file.arrayBuffer();
+
+        const workbook = XLSX.read(data, {
+          type: 'array'
+        });
+
+        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+
+        const json = XLSX.utils.sheet_to_json(firstSheet);
+
+        tbody.innerHTML = '';
+
+        json.forEach(item => {
+
+          addRow({
+            erledigt: item.Erledigt === 'Ja' || item.Erledigt === true,
+            nummer: item.Nummer || '',
+            raum: item.Raumnummer || '',
+            lehrer: item.Lehrer || '',
+            notiz: item.Notizen || ''
+          });
+
+        });
+
+        ensureEmptyRow();
+
+      } catch (err) {
+
+        console.log(err);
+
+      }
+    }
+
+    async function saveExcel() {
+
+      if (!currentFileHandle) {
+
+        alert('Keine Datei geöffnet!');
+
+        return;
+      }
+
       const rows = [];
 
       document.querySelectorAll('#checklistTable tbody tr').forEach(row => {
+
         const cells = row.querySelectorAll('td');
 
         rows.push({
@@ -165,73 +240,106 @@
           Lehrer: cells[3].querySelector('input').value,
           Notizen: cells[4].querySelector('input').value
         });
+
       });
 
       const worksheet = XLSX.utils.json_to_sheet(rows);
+
       const workbook = XLSX.utils.book_new();
 
-      XLSX.utils.book_append_sheet(workbook, worksheet, 'Checkliste');
+      XLSX.utils.book_append_sheet(
+        workbook,
+        worksheet,
+        'Checkliste'
+      );
+
+      const excelBuffer = XLSX.write(workbook, {
+        bookType: 'xlsx',
+        type: 'array'
+      });
+
+      const writable = await currentFileHandle.createWritable();
+
+      await writable.write(excelBuffer);
+
+      await writable.close();
+
+      alert('Datei gespeichert!');
+    }
+
+    function exportExcel() {
+
+      const rows = [];
+
+      document.querySelectorAll('#checklistTable tbody tr').forEach(row => {
+
+        const cells = row.querySelectorAll('td');
+
+        rows.push({
+          Erledigt: cells[0].querySelector('input').checked ? 'Ja' : 'Nein',
+          Nummer: cells[1].querySelector('input').value,
+          Raumnummer: cells[2].querySelector('input').value,
+          Lehrer: cells[3].querySelector('input').value,
+          Notizen: cells[4].querySelector('input').value
+        });
+
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+
+      const workbook = XLSX.utils.book_new();
+
+      XLSX.utils.book_append_sheet(
+        workbook,
+        worksheet,
+        'Checkliste'
+      );
 
       XLSX.writeFile(workbook, 'Checkliste.xlsx');
     }
 
-    function importExcel(event) {
-      const file = event.target.files[0];
-      if (!file) return;
-
-      const reader = new FileReader();
-
-      reader.onload = function(e) {
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
-
-        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-        const json = XLSX.utils.sheet_to_json(firstSheet);
-
-        tbody.innerHTML = '';
-
-        json.forEach(item => {
-          addRow({
-            erledigt: item.Erledigt === 'Ja' || item.Erledigt === true,
-            nummer: item.Nummer || '',
-            raum: item.Raumnummer || '',
-            lehrer: item.Lehrer || '',
-            notiz: item.Notizen || ''
-          });
-        });
-      };
-
-      reader.readAsArrayBuffer(file);
-    }
-
-    // Automatisch neue Zeile hinzufügen
     function ensureEmptyRow() {
-      const rows = document.querySelectorAll('#checklistTable tbody tr');
+
+      const rows = document.querySelectorAll(
+        '#checklistTable tbody tr'
+      );
+
       const lastRow = rows[rows.length - 1];
 
       if (!lastRow) {
+
         addRow();
+
         return;
       }
 
-      const inputs = lastRow.querySelectorAll('input[type="text"]');
-      const hasContent = Array.from(inputs).some(input => input.value.trim() !== '');
+      const inputs = lastRow.querySelectorAll(
+        'input[type="text"]'
+      );
+
+      const hasContent = Array.from(inputs).some(input =>
+        input.value.trim() !== ''
+      );
 
       if (hasContent) {
+
         addRow();
       }
     }
 
     tbody.addEventListener('input', (e) => {
+
       if (e.target.tagName === 'INPUT') {
+
         ensureEmptyRow();
       }
     });
 
-    // Standardzeilen
     for (let i = 0; i < 10; i++) {
+
       addRow();
     }
+
   </script>
 
 </body>
